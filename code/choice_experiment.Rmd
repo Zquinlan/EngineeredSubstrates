@@ -1,0 +1,80 @@
+---
+title: "Choice_settlement_2019"
+author: "Zachary A Quinlan"
+date: "2/25/2020"
+output: html_document
+---
+```{r message = FALSE, warning = FALSE, echo = FALSE}
+library(tidyverse)
+library(readxl)
+library(lme4)
+library(multcomp)
+library(ggplot2)
+library(rmarkdown)
+
+
+map <- purrr::map
+select <- dplyr::select
+tidy <- broom::tidy
+rename <- dplyr::rename
+
+zscore <- function(x) {
+  (x-mean(x, na.rm = TRUE))/sd(x, na.rm = TRUE)
+}
+```
+
+```{r message = FALSE, warning = FALSE, echo = FALSE}
+choice_raw <- read_xlsx("~/Documents/GitHub/choice_settlement/data/raw/choice_cleaned.xlsx")
+```
+
+# Cleaning up the data for statistical analysis
+```{r warning = FALSE}
+choice_clean <- choice_raw%>%
+  gather(tile_type, count, 3:ncol(.))%>% ## This turns all of the columns you had into rows
+  group_by(Species, Bin)%>% ## grouping by species and bin so that we can calculate percent
+  mutate(percent = count/sum(count, na.rm = TRUE),
+         asin = asin(sqrt(percent)))
+```
+
+### Quantile-quantile plots of both percent and angularly transformed data
+```{r warning = FALSE, message = FALSE, echo = FALSE}
+percent_check <- choice_clean$percent
+asin_check <- choice_clean$asin
+
+car::qqPlot(percent_check, 
+            ylab = "Percent quantiles", xlab = "Normal quantiles",
+            main = 'QQ-plot: Percent')
+
+car::qqPlot(asin_check, 
+            ylab = "Angular quantiles", xlab = "Normal quantiles",
+            main = 'QQ-plot: Angular')
+```
+
+# anova model
+```{r echo = FALSE}
+model <- choice_clean%>%
+  group_by(Species)%>%
+  nest()%>%
+  mutate(data = map(data, ~ aov(asin ~ tile_type, data = .x)%>%
+                      tidy()))%>%
+  unnest(data)
+
+model
+```
+## Tukey Post-hoc
+#### Only showing significant P-values
+```{r echo = FALSE}
+Tukey <- choice_clean%>%
+  group_by(Species)%>%
+  nest()%>%
+  mutate(data = map(data, ~ aov(asin ~ tile_type, data = .x)%>%
+                      TukeyHSD(p.adjust.methods = "BH")%>%
+                      tidy()))%>%
+  unnest(data)
+
+paged_table(Tukey%>%
+  filter(adj.p.value <= 0.05))
+
+write_csv(Tukey, "~/Documents/GitHub/choice_settlement/data/analysis/Tukey_pvals.csv")
+```
+
