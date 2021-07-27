@@ -19,6 +19,5 @@ The widespread loss of stony reef-building coral populations has been compounded
 ### raw
 - Raw data imports for the project
 
-<br />
-### Analysis
+### Analysis:
 - Tukey p values with FDR correction
