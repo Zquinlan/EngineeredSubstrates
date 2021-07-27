@@ -1,5 +1,5 @@
 ---
-title: "Choice_settlement_2019"
+title: "EngineeredSubstrates_2019"
 author: "Zachary A Quinlan"
 date: "2/25/2020"
 output: html_document
@@ -24,7 +24,10 @@ zscore <- function(x) {
 ```
 
 ```{r message = FALSE, warning = FALSE, echo = FALSE}
-choice_raw <- read_xlsx("~/Documents/GitHub/choice_settlement/data/raw/choice_cleaned.xlsx")
+choice_raw <- read_xlsx("~/Documents/GitHub/EngineeredSubstrates/data/raw/choice_cleaned.xlsx")
+contact_raw <- read_xlsx("~/Documents/GitHub/EngineeredSubstrates/data/raw/ContactAngle.xlsx")
+roughness_raw <- read_xlsx("~/Documents/GitHub/EngineeredSubstrates/data/raw/RoughnessAreaRatio.xlsx")
+
 ```
 
 # Cleaning up the data for statistical analysis
@@ -34,9 +37,21 @@ choice_clean <- choice_raw%>%
   group_by(Species, Bin)%>% ## grouping by species and bin so that we can calculate percent
   mutate(percent = count/sum(count, na.rm = TRUE),
          asin = asin(sqrt(percent)))
+
+contact_clean <- contact_raw%>%
+  select(-c(11:12))%>%
+  gather(tile_type, angle, 2:ncol(.))%>%
+  mutate(angle = as.numeric(angle))
+
+roughness_clean <- roughness_raw%>%
+  select(-c(11:12))%>%
+  filter(!is.na(Replicate))%>%
+  add_column(measurement = c('roughness', 'roughness', 'roughness', 'surfaceAreaRatio', 'surfaceAreaRatio', 'surfaceAreaRatio'), .before = 1)%>%
+  gather(tile_type, value, 3:ncol(.))
 ```
 
 ### Quantile-quantile plots of both percent and angularly transformed data
+### settlement choice proportional data
 ```{r warning = FALSE, message = FALSE, echo = FALSE}
 percent_check <- choice_clean$percent
 asin_check <- choice_clean$asin
@@ -48,23 +63,68 @@ car::qqPlot(percent_check,
 car::qqPlot(asin_check, 
             ylab = "Angular quantiles", xlab = "Normal quantiles",
             main = 'QQ-plot: Angular')
+
 ```
 
-# anova model
+### Substrate roughenss, contact angle and surface area ratio
+```{r warning = FALSE, message = FALSE, echo = FALSE}
+contactAngleCheck <- contact_clean$angle
+
+roughnessCheck <- (roughness_clean%>%
+                     filter(measurement == 'roughness'))$value
+
+surfaceAreaRatioCheck <- (roughness_clean%>%
+                     filter(measurement == 'surfaceAreaRatio'))$value
+
+car::qqPlot(contactAngleCheck, 
+            ylab = "Contact Angle Quantiles", xlab = "Normal quantiles",
+            main = 'QQ-plot: Contact Angle')
+
+car::qqPlot(roughnessCheck, 
+            ylab = "Roughness quantiles", xlab = "Normal quantiles",
+            main = 'QQ-plot: Roughness')
+
+
+car::qqPlot(surfaceAreaRatioCheck, 
+            ylab = "Surface Area Ratio quantiles", xlab = "Normal quantiles",
+            main = 'QQ-plot: Surface Area Ratio')
+
+```
+
+# anova models
 ```{r echo = FALSE}
-model <- choice_clean%>%
+choiceModel <- choice_clean%>%
   group_by(Species)%>%
   nest()%>%
   mutate(data = map(data, ~ aov(asin ~ tile_type, data = .x)%>%
                       tidy()))%>%
   unnest(data)
 
-model
+
+roughnessAreaModels <- roughness_clean%>%
+  group_by(measurement)%>%
+  nest()%>%
+  mutate(data = map(data, ~ aov(value ~ tile_type, data = .x)%>%
+                      tidy()))%>%
+  unnest(data)
+
+contactAngleModel <- contact_clean%>%
+  aov(angle ~ tile_type, data = .)%>%
+  tidy()
+
+bind_rows(choiceModel, roughnessAreaModels)%>%
+  bind_rows(contactAngleModel)%>%
+  ungroup()%>%
+  mutate(test = case_when(!is.na(Species) ~ Species,
+                          !is.na(measurement) ~ measurement,
+                          TRUE ~ 'Contact Angle'))%>%
+  select(test, everything())%>%
+  select(-c(Species, measurement))
 ```
 ## Tukey Post-hoc
 #### Only showing significant P-values
 ```{r echo = FALSE}
-Tukey <- choice_clean%>%
+choiceTukey <- choice_clean%>%
   group_by(Species)%>%
   nest()%>%
   mutate(data = map(data, ~ aov(asin ~ tile_type, data = .x)%>%
@@ -72,9 +132,33 @@ Tukey <- choice_clean%>%
                       tidy()))%>%
   unnest(data)
 
-paged_table(Tukey%>%
+roughnessAreaTukey <- roughness_clean%>%
+  group_by(measurement)%>%
+  nest()%>%
+  mutate(data = map(data, ~ aov(value ~ tile_type, data = .x)%>%
+                      TukeyHSD(p.adjust.methods = "BH")%>%
+                      tidy()))%>%
+  unnest(data)
+
+contactAngleTukey <- contact_clean%>%
+  aov(angle ~ tile_type, data = .)%>%
+  TukeyHSD(p.adjust.methods = "BH")%>%
+  tidy()
+
+
+paged_table(choiceTukey%>%
+              ungroup()%>%
+              bind_rows(roughnessAreaTukey)%>%
+              bind_rows(contactAngleTukey)%>%
+              mutate(test = case_when(!is.na(Species) ~ Species,
+                          !is.na(measurement) ~ measurement,
+                          TRUE ~ 'Contact Angle'))%>%
+  select(test, everything())%>%
+  select(-c(Species, measurement))%>%
   filter(adj.p.value <= 0.05))
 
-write_csv(Tukey, "~/Documents/GitHub/choice_settlement/data/analysis/Tukey_pvals.csv")
+write_csv(choiceTukey, "~/Documents/GitHub/EngineeredSubstrates/data/analysis/choiceTukey.csv")
+write_csv(roughnessAreaTukey, "~/Documents/GitHub/EngineeredSubstrates/data/analysis/roughnessAreaTukey.csv")
+write_csv(contactAngleTukey, "~/Documents/GitHub/EngineeredSubstrates/data/analysis/contactAngleTukey.csv")
 ```
 
